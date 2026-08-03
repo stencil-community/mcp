@@ -1,0 +1,124 @@
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { detectStencilVersion } from './detectVersion.js';
+import { DECORATORS, LIFECYCLE } from './data/decorators.js';
+import { BEST_PRACTICES } from './data/bestPractices.js';
+
+export const SERVER_NAME = '@stencil/mcp';
+export const SERVER_VERSION = '0.1.0';
+
+/**
+ * Builds the Stencil MCP server with its tool set registered.
+ * Exported (rather than only run) so it can be unit-tested in-process.
+ */
+export function createStencilMcpServer(): Server {
+  const server = new Server(
+    { name: SERVER_NAME, version: SERVER_VERSION },
+    { capabilities: { tools: {} } },
+  );
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: [
+      {
+        name: 'detect_stencil_version',
+        description:
+          "Detect the StencilJS version a project is actually using so suggestions match the installed framework. Reads node_modules/@stencil/core and package.json.",
+        inputSchema: {
+          type: 'object',
+          properties: {
+            projectRoot: {
+              type: 'string',
+              description: 'Absolute path to the project root. Defaults to the current working directory.',
+            },
+          },
+        },
+      },
+      {
+        name: 'get_decorator_reference',
+        description:
+          'Get accurate reference for StencilJS decorators (@Component, @Prop, @State, @Watch, @Event, @Listen, @Method, @Element, @AttachInternals), including signatures, idiomatic examples, and anti-patterns to avoid.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            name: {
+              type: 'string',
+              description: 'Optional decorator name (without @) to look up. Omit to list all decorators.',
+            },
+          },
+        },
+      },
+      {
+        name: 'get_lifecycle_reference',
+        description:
+          'Get the StencilJS component lifecycle methods (componentWillLoad, componentDidLoad, render, etc.) with when each fires.',
+        inputSchema: { type: 'object', properties: {} },
+      },
+      {
+        name: 'get_best_practices',
+        description:
+          'Get idiomatic StencilJS best practices as concrete "wrong vs right" rules, so AI suggestions use built-in Stencil features instead of manual workarounds.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'string',
+              description: 'Optional best-practice id to fetch a single rule. Omit to get all.',
+            },
+          },
+        },
+      },
+    ],
+  }));
+
+  server.setRequestHandler(CallToolRequestSchema, async (req) => {
+    const { name, arguments: args = {} } = req.params;
+
+    switch (name) {
+      case 'detect_stencil_version': {
+        const root = (args.projectRoot as string) || process.cwd();
+        const info = await detectStencilVersion(root);
+        return textResult(info.message + '\n\n' + JSON.stringify(info, null, 2));
+      }
+
+      case 'get_decorator_reference': {
+        const wanted = (args.name as string | undefined)?.replace(/^@/, '').toLowerCase();
+        if (wanted) {
+          const doc = DECORATORS.find((d) => d.name.toLowerCase() === wanted);
+          if (!doc) {
+            return textResult(
+              `Unknown decorator "@${wanted}". Known decorators: ${DECORATORS.map((d) => '@' + d.name).join(', ')}.`,
+            );
+          }
+          return textResult(JSON.stringify(doc, null, 2));
+        }
+        return textResult(JSON.stringify(DECORATORS, null, 2));
+      }
+
+      case 'get_lifecycle_reference':
+        return textResult(JSON.stringify(LIFECYCLE, null, 2));
+
+      case 'get_best_practices': {
+        const id = args.id as string | undefined;
+        if (id) {
+          const bp = BEST_PRACTICES.find((b) => b.id === id);
+          return textResult(
+            bp ? JSON.stringify(bp, null, 2) : `Unknown best-practice id "${id}".`,
+          );
+        }
+        return textResult(JSON.stringify(BEST_PRACTICES, null, 2));
+      }
+
+      default:
+        return {
+          isError: true,
+          content: [{ type: 'text', text: `Unknown tool: ${name}` }],
+        };
+    }
+  });
+
+  return server;
+}
+
+function textResult(text: string) {
+  return { content: [{ type: 'text' as const, text }] };
+}
