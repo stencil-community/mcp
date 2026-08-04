@@ -1,7 +1,8 @@
 # @stencil-community/mcp
 
 A [Model Context Protocol](https://modelcontextprotocol.io) server that gives AI
-coding agents **accurate, version-aware knowledge of a StencilJS project**.
+coding agents **accurate knowledge of a StencilJS project, including the version
+it is actually running**.
 
 > Community project, originally proposed in [stenciljs/core#6518](https://github.com/stenciljs/core/issues/6518).
 
@@ -24,6 +25,13 @@ which Stencil version the project is actually running.
 
 All reference content is sourced from Stencil's own public runtime type
 declarations, so it matches the framework rather than guessing.
+
+> **On versioning:** `detect_stencil_version` resolves the project's actual
+> version at call time. The reference tools currently return the same content
+> regardless of that version; where an API was added after Stencil 1.x it carries
+> a `since` marker (e.g. `@AttachInternals` is `since: 4.5.0`) so agents can avoid
+> suggesting it on older majors. Filtering reference output by the detected
+> version is planned as a follow-up.
 
 ## Usage
 

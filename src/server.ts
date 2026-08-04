@@ -28,9 +28,11 @@ export function createStencilMcpServer(): Server {
           properties: {
             projectRoot: {
               type: 'string',
-              description: 'Absolute path to the project root. Defaults to the current working directory.',
+              description:
+                "Absolute path to the project root. Required: an MCP server is spawned by the client (e.g. Claude Desktop) and does not run from the project directory, so the path must be passed explicitly.",
             },
           },
+          required: ['projectRoot'],
         },
       },
       {
@@ -75,7 +77,18 @@ export function createStencilMcpServer(): Server {
 
     switch (name) {
       case 'detect_stencil_version': {
-        const root = (args.projectRoot as string) || process.cwd();
+        const root = args.projectRoot as string | undefined;
+        if (!root) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: 'text',
+                text: 'detect_stencil_version requires a "projectRoot" argument (an absolute path to the project). It cannot be inferred, because the MCP server is spawned by the client rather than run from the project directory.',
+              },
+            ],
+          };
+        }
         const info = await detectStencilVersion(root);
         return textResult(info.message + '\n\n' + JSON.stringify(info, null, 2));
       }

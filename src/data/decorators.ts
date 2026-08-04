@@ -15,6 +15,11 @@ export interface DecoratorDoc {
   example: string;
   /** Common mistakes agents make that this decorator replaces. */
   antiPattern?: string;
+  /**
+   * Stencil version this decorator was introduced in, when it is not part of
+   * the original API. Omitted for decorators available since Stencil 1.x.
+   */
+  since?: string;
 }
 
 export const DECORATORS: DecoratorDoc[] = [
@@ -99,6 +104,7 @@ export const DECORATORS: DecoratorDoc[] = [
       "When formAssociated is set in @Component(), provides access to the ElementInternals instance for the component (form-associated custom elements).",
     docsUrl: 'https://stenciljs.com/docs/form-associated',
     example: `@Component({ tag: 'my-input', formAssociated: true })\nexport class MyInput {\n  @AttachInternals() internals: ElementInternals;\n}`,
+    since: '4.5.0',
   },
 ];
 
