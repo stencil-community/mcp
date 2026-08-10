@@ -19,7 +19,7 @@ which Stencil version the project is actually running.
 | Tool | Purpose |
 | --- | --- |
 | `detect_stencil_version` | Resolves the version from `node_modules/@stencil/core` (authoritative) and the declared range in `package.json`. |
-| `get_decorator_reference` | Signatures, idiomatic examples, and anti-patterns for `@Component`, `@Prop`, `@State`, `@Watch`, `@Event`, `@Listen`, `@Method`, `@Element`, `@AttachInternals`. |
+| `get_decorator_reference` | Signatures, idiomatic examples, and anti-patterns for `@Component`, `@Prop`, `@State`, `@Watch`, `@Event`, `@Listen`, `@Method`, `@Element`, `@AttachInternals`. Accepts an optional `version` or `projectRoot` to filter out decorators newer than the Stencil the project runs. |
 | `get_lifecycle_reference` | The component lifecycle hooks and when each fires. |
 | `get_best_practices` | Concrete "wrong vs right" rules so agents use built-in Stencil features. |
 
@@ -27,11 +27,13 @@ All reference content is sourced from Stencil's own public runtime type
 declarations, so it matches the framework rather than guessing.
 
 > **On versioning:** `detect_stencil_version` resolves the project's actual
-> version at call time. The reference tools currently return the same content
-> regardless of that version; where an API was added after Stencil 1.x it carries
-> a `since` marker (e.g. `@AttachInternals` is `since: 4.5.0`) so agents can avoid
-> suggesting it on older majors. Filtering reference output by the detected
-> version is planned as a follow-up.
+> version at call time. `get_decorator_reference` is version-aware: pass a
+> `version` (e.g. `"4.4.0"`), or a `projectRoot` to have the installed version
+> detected automatically, and decorators introduced later are dropped from the
+> listing (and reported under `unavailable`) or flagged `availableInVersion:
+> false` when looked up by name. APIs added after Stencil 1.x carry a `since`
+> marker (e.g. `@AttachInternals` is `since: 4.5.0`) that drives this filtering.
+> Called without a version, the tool returns the full reference unchanged.
 
 ## Usage
 

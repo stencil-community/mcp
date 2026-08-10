@@ -3,6 +3,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 import { detectStencilVersion } from './detectVersion.js';
 import { DECORATORS, LIFECYCLE } from './data/decorators.js';
 import { BEST_PRACTICES } from './data/bestPractices.js';
+import { isAvailableIn, splitByVersion } from './versionFilter.js';
 
 export const SERVER_NAME = '@stencil/mcp';
 export const SERVER_VERSION = '0.1.0';
@@ -38,13 +39,23 @@ export function createStencilMcpServer(): Server {
       {
         name: 'get_decorator_reference',
         description:
-          'Get accurate reference for StencilJS decorators (@Component, @Prop, @State, @Watch, @Event, @Listen, @Method, @Element, @AttachInternals), including signatures, idiomatic examples, and anti-patterns to avoid.',
+          'Get accurate reference for StencilJS decorators (@Component, @Prop, @State, @Watch, @Event, @Listen, @Method, @Element, @AttachInternals), including signatures, idiomatic examples, and anti-patterns to avoid. Pass a version (or projectRoot) to filter out decorators introduced after the Stencil the project actually runs.',
         inputSchema: {
           type: 'object',
           properties: {
             name: {
               type: 'string',
               description: 'Optional decorator name (without @) to look up. Omit to list all decorators.',
+            },
+            version: {
+              type: 'string',
+              description:
+                'Optional Stencil version (e.g. "4.4.0"). Decorators introduced after this version are excluded when listing, or flagged as unavailable when looked up by name. Takes precedence over projectRoot.',
+            },
+            projectRoot: {
+              type: 'string',
+              description:
+                "Optional absolute path to the project root. When given (and version is not), the installed @stencil/core version is detected and used to filter the reference automatically.",
             },
           },
         },
@@ -95,6 +106,11 @@ export function createStencilMcpServer(): Server {
 
       case 'get_decorator_reference': {
         const wanted = (args.name as string | undefined)?.replace(/^@/, '').toLowerCase();
+        const version = await resolveVersion(
+          args.version as string | undefined,
+          args.projectRoot as string | undefined,
+        );
+
         if (wanted) {
           const doc = DECORATORS.find((d) => d.name.toLowerCase() === wanted);
           if (!doc) {
@@ -102,9 +118,29 @@ export function createStencilMcpServer(): Server {
               `Unknown decorator "@${wanted}". Known decorators: ${DECORATORS.map((d) => '@' + d.name).join(', ')}.`,
             );
           }
+          if (version && !isAvailableIn(version, doc.since)) {
+            return textResult(
+              JSON.stringify(
+                {
+                  decorator: doc,
+                  availableInVersion: false,
+                  note: `@${doc.name} was introduced in Stencil ${doc.since} but this project runs ${version}. Do not suggest it here.`,
+                },
+                null,
+                2,
+              ),
+            );
+          }
           return textResult(JSON.stringify(doc, null, 2));
         }
-        return textResult(JSON.stringify(DECORATORS, null, 2));
+
+        if (!version) {
+          return textResult(JSON.stringify(DECORATORS, null, 2));
+        }
+        const { available, unavailable } = splitByVersion(DECORATORS, version);
+        return textResult(
+          JSON.stringify({ stencilVersion: version, decorators: available, unavailable }, null, 2),
+        );
       }
 
       case 'get_lifecycle_reference':
@@ -134,4 +170,21 @@ export function createStencilMcpServer(): Server {
 
 function textResult(text: string) {
   return { content: [{ type: 'text' as const, text }] };
+}
+
+/**
+ * Resolves the Stencil version to filter reference output against.
+ *
+ * An explicit `version` wins. Otherwise, if a `projectRoot` is given, the
+ * installed (or, failing that, declared) version is detected from disk. Returns
+ * undefined when neither yields a version, in which case callers do not filter.
+ */
+async function resolveVersion(
+  version: string | undefined,
+  projectRoot: string | undefined,
+): Promise<string | undefined> {
+  if (version) return version;
+  if (!projectRoot) return undefined;
+  const info = await detectStencilVersion(projectRoot);
+  return info.installedVersion ?? info.declaredRange ?? undefined;
 }
