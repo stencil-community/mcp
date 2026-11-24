@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseVersion, isAvailableIn, splitByVersion } from '../src/versionFilter.ts';
-import { DECORATORS } from '../src/data/decorators.ts';
+import { parseVersion, isAvailableIn, splitByVersion, forVersion } from '../src/versionFilter.ts';
+import { DECORATORS, LIFECYCLE } from '../src/data/decorators.ts';
 
 test('parseVersion coerces clean, ranged and prefixed versions', () => {
   assert.deepEqual(parseVersion('4.43.5'), { major: 4, minor: 43, patch: 5 });
@@ -38,7 +38,7 @@ test('isAvailableIn does not filter when a version cannot be parsed', () => {
 test('splitByVersion excludes AttachInternals on Stencil < 4.5', () => {
   const { available, unavailable } = splitByVersion(DECORATORS, '4.4.0');
   assert.ok(!available.some((d) => d.name === 'AttachInternals'), 'AttachInternals excluded');
-  assert.deepEqual(unavailable, [{ name: 'AttachInternals', since: '4.5.0' }]);
+  assert.ok(unavailable.some((u) => u.name === 'AttachInternals' && u.since === '4.5.0'));
 });
 
 test('splitByVersion keeps everything on a current version', () => {
@@ -51,4 +51,43 @@ test('splitByVersion keeps everything when version is undefined', () => {
   const { available, unavailable } = splitByVersion(DECORATORS, undefined);
   assert.equal(available.length, DECORATORS.length);
   assert.equal(unavailable.length, 0);
+});
+
+const decorator = (name: string, version?: string) =>
+  forVersion(DECORATORS.find((d) => d.name === name)!, version);
+
+test('forVersion gives the Stencil 4 API for Stencil 4', () => {
+  const component = decorator('Component', '4.45.5');
+  assert.match(component.example, /shadow: true/);
+  assert.equal(component.docsUrl, 'https://stenciljs.com/docs/component');
+  assert.equal(component.changes, undefined);
+});
+
+test('forVersion gives the Stencil 5 API for Stencil 5 and its prereleases', () => {
+  for (const version of ['5.0.0', '5.0.0-rc.9', '^5.1.0']) {
+    const component = decorator('Component', version);
+    assert.match(component.example, /encapsulation: \{ type: 'shadow' \}/);
+    assert.doesNotMatch(component.example, /shadow: true/);
+    assert.equal(component.docsUrl, 'https://stenciljs.com/docs/v5/component');
+  }
+  assert.doesNotMatch(decorator('AttachInternals', '5.0.0').example, /formAssociated/);
+});
+
+test('forVersion applies only the changes introduced by that version', () => {
+  assert.doesNotMatch(decorator('Watch', '4.39.0').signature, /immediate/);
+  assert.match(decorator('Watch', '4.40.0').signature, /immediate/);
+  assert.match(decorator('Watch', '5.0.0').signature, /immediate/);
+});
+
+test('forVersion leaves the entry alone when the version is unknown', () => {
+  const source = DECORATORS.find((d) => d.name === 'Component')!;
+  assert.equal(forVersion(source, undefined), source);
+  assert.equal(forVersion(source, 'next'), source);
+});
+
+test('forVersion does not modify the reference data', () => {
+  const before = JSON.stringify([DECORATORS, LIFECYCLE]);
+  for (const item of DECORATORS) forVersion(item, '5.0.0');
+  for (const item of LIFECYCLE) forVersion(item, '5.0.0');
+  assert.equal(JSON.stringify([DECORATORS, LIFECYCLE]), before);
 });

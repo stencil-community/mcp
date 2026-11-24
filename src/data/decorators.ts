@@ -4,7 +4,13 @@
  * Descriptions are sourced from Stencil's own public runtime type
  * declarations (`src/declarations/stencil-public-runtime.ts`) so the guidance
  * an AI agent receives matches the installed framework rather than a guess.
+ *
+ * Stencil 5 content was checked against the `v5` branch of stenciljs/core at
+ * 56b8bdd3 (5.0.0-rc), in `packages/core/src/declarations/stencil-public-runtime.ts`
+ * and `BREAKING_CHANGES.md`.
  */
+
+import type { VersionChange } from '../versionFilter.js';
 
 export interface DecoratorDoc {
   name: string;
@@ -20,6 +26,8 @@ export interface DecoratorDoc {
    * the original API. Omitted for decorators available since Stencil 1.x.
    */
   since?: string;
+  /** How the API differs in later versions, oldest first. */
+  changes?: VersionChange<DecoratorDoc>[];
 }
 
 export const DECORATORS: DecoratorDoc[] = [
@@ -30,6 +38,19 @@ export const DECORATORS: DecoratorDoc[] = [
       'Provides metadata about the component class, such as its custom element tag name, associated styles, and shadow/scoped encapsulation.',
     docsUrl: 'https://stenciljs.com/docs/component',
     example: `@Component({\n  tag: 'my-button',\n  styleUrl: 'my-button.css',\n  shadow: true,\n})\nexport class MyButton {}`,
+    changes: [
+      {
+        since: '5.0.0',
+        note: '`encapsulation` replaces `shadow` and `scoped`; `formAssociated` is replaced by @AttachInternals().',
+        override: {
+          summary:
+            "Provides metadata about the component class, such as its custom element tag name, associated styles, and encapsulation ('shadow', 'scoped' or 'none'; defaults to 'none').",
+          example: `@Component({\n  tag: 'my-button',\n  styleUrl: 'my-button.css',\n  encapsulation: { type: 'shadow' },\n})\nexport class MyButton {}`,
+          antiPattern:
+            'Do not use `shadow`, `scoped` or `formAssociated` in @Component(); they were replaced in Stencil 5.',
+        },
+      },
+    ],
   },
   {
     name: 'Prop',
@@ -40,6 +61,16 @@ export const DECORATORS: DecoratorDoc[] = [
     example: `@Prop() name: string;\n@Prop({ reflect: true }) disabled = false;`,
     antiPattern:
       'Do not mutate a @Prop from inside the component; treat it as read-only input. Use @State for internal mutable data.',
+    changes: [
+      {
+        since: '5.0.0',
+        note: 'A boolean prop is true whenever its attribute is present, including `disabled="false"`. After the first render, reflected attributes update as soon as the prop changes.',
+        override: {
+          antiPattern:
+            'Do not mutate a @Prop from inside the component; treat it as read-only input. Use @State for internal mutable data. Do not write `attr="false"` for a boolean prop: remove the attribute or set the property to false.',
+        },
+      },
+    ],
   },
   {
     name: 'State',
@@ -58,6 +89,22 @@ export const DECORATORS: DecoratorDoc[] = [
       'Calls the decorated method when a @Prop or @State value changes, receiving the new and old values. Useful for validation and side effects. Does not fire on initial component load.',
     docsUrl: 'https://stenciljs.com/docs/reactive-data#watch-decorator',
     example: `@Prop() value: string;\n\n@Watch('value')\nvalidateValue(newValue: string, oldValue: string) {\n  // react to the change\n}`,
+    changes: [
+      {
+        since: '4.40.0',
+        note: 'Accepts an `immediate` option.',
+        override: { signature: '@Watch(propName: string, opts?: { immediate?: boolean })' },
+      },
+      {
+        since: '5.0.0',
+        note: 'Handlers never fire before the component has first rendered, unless `immediate: true` is set.',
+        override: {
+          summary:
+            'Calls the decorated method when a @Prop or @State value changes, receiving the new and old values. Useful for validation and side effects. Does not fire until the component has first rendered, unless `immediate: true` is set.',
+          docsUrl: 'https://stenciljs.com/docs/reactive-data',
+        },
+      },
+    ],
   },
   {
     name: 'Element',
@@ -105,6 +152,37 @@ export const DECORATORS: DecoratorDoc[] = [
     docsUrl: 'https://stenciljs.com/docs/form-associated',
     example: `@Component({ tag: 'my-input', formAssociated: true })\nexport class MyInput {\n  @AttachInternals() internals: ElementInternals;\n}`,
     since: '4.5.0',
+    changes: [
+      {
+        since: '5.0.0',
+        note: 'Makes the component form-associated by default. Pass `formAssociated: false` to use ElementInternals without form association.',
+        override: {
+          signature:
+            '@AttachInternals(opts?: { formAssociated?: boolean; states?: { [name: string]: boolean } })',
+          summary:
+            'Provides access to the ElementInternals instance and makes the component form-associated, unless `formAssociated: false` is passed.',
+          example: `@Component({ tag: 'my-input' })\nexport class MyInput {\n  @AttachInternals() internals: ElementInternals;\n}`,
+          antiPattern: 'Do not set `formAssociated` in @Component(); it was removed in Stencil 5.',
+        },
+      },
+    ],
+  },
+  {
+    name: 'PropSerialize',
+    signature: '@PropSerialize(propName: string)',
+    summary:
+      'Decorates a method that turns a @Prop value into its attribute string. Return null to remove the attribute.',
+    docsUrl: 'https://stenciljs.com/docs/serialization',
+    example: `@Prop({ reflect: true }) items: string[];\n\n@PropSerialize('items')\nserializeItems(value: string[]): string | null {\n  return value ? value.join(',') : null;\n}`,
+    since: '4.38.0',
+  },
+  {
+    name: 'AttrDeserialize',
+    signature: '@AttrDeserialize(propName: string)',
+    summary: 'Decorates a method that turns an attribute string into the @Prop value.',
+    docsUrl: 'https://stenciljs.com/docs/serialization',
+    example: `@Prop() items: string[];\n\n@AttrDeserialize('items')\nparseItems(value: string | null): string[] {\n  return value ? value.split(',') : [];\n}`,
+    since: '4.38.0',
   },
 ];
 
@@ -112,6 +190,7 @@ export interface LifecycleDoc {
   name: string;
   summary: string;
   fires: 'once' | 'every-render' | 'conditional';
+  changes?: VersionChange<LifecycleDoc>[];
 }
 
 /** Lifecycle method names verified against ComponentInterface in the source. */
@@ -120,7 +199,15 @@ export const LIFECYCLE: LifecycleDoc[] = [
   { name: 'disconnectedCallback', summary: 'Called every time the element is disconnected from the DOM.', fires: 'conditional' },
   { name: 'componentWillLoad', summary: 'Called once, before the component first renders. May return a Promise; rendering waits for it. Ideal for async data needed before first paint.', fires: 'once' },
   { name: 'componentDidLoad', summary: 'Called once, after the component has fully loaded and rendered for the first time.', fires: 'once' },
-  { name: 'componentShouldUpdate', summary: 'Called before re-render (not on first render). Return false to skip the render.', fires: 'conditional' },
+  { name: 'componentShouldUpdate', summary: 'Called before re-render (not on first render). Return false to skip the render.', fires: 'conditional', changes: [
+    {
+      since: '5.0.0',
+      note: 'Called once per render cycle with a single `changes` map, instead of once per changed member with (newVal, oldVal, propName).',
+      override: {
+        summary: 'Called once before a re-render (not on first render) with a `changes` map of every changed prop/state name to { newVal, oldVal }. Return false to skip the render.',
+      },
+    },
+  ] },
   { name: 'componentWillRender', summary: 'Called before every render.', fires: 'every-render' },
   { name: 'componentDidRender', summary: 'Called after every render.', fires: 'every-render' },
   { name: 'componentWillUpdate', summary: 'Called before every render that is not the first (an update).', fires: 'conditional' },

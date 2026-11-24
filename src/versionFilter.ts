@@ -81,3 +81,38 @@ export function splitByVersion<T extends { name: string; since?: string }>(
   }
   return { available, unavailable };
 }
+
+/** Fields of a reference entry that differ from `since` onwards. */
+export interface VersionChange<T> {
+  since: string;
+  /** What changed, in one or two sentences. */
+  note: string;
+  /** Replacement values for the entry's own fields. */
+  override: Partial<Omit<T, 'name' | 'since' | 'changes'>>;
+}
+
+/**
+ * Returns `item` as it behaves in `version`: applies every change introduced up
+ * to that version and points docs links at the matching docs.
+ *
+ * Without a usable version the entry is returned unchanged, with its `changes`
+ * still listed. Prereleases count as their release (5.0.0-rc.1 is 5.0.0).
+ */
+export function forVersion<T extends { docsUrl?: string; changes?: VersionChange<any>[] }>(
+  item: T,
+  version: string | undefined,
+): T {
+  const parsed = parseVersion(version);
+  if (!parsed) return item;
+
+  const { changes = [], ...rest } = item;
+  const result = { ...rest } as T;
+  for (const change of changes) {
+    if (isAvailableIn(version, change.since)) Object.assign(result, change.override);
+  }
+  // Stencil 5 docs live under /docs/v5/ until it becomes the default docs version.
+  if (result.docsUrl && parsed.major === 5) {
+    result.docsUrl = result.docsUrl.replace('stenciljs.com/docs/', 'stenciljs.com/docs/v5/');
+  }
+  return result;
+}

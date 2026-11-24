@@ -10,6 +10,8 @@ export interface BestPractice {
   right: string;
   why: string;
   docsUrl?: string;
+  /** Stencil version the rule applies from. Omitted when it applies to every version. */
+  since?: string;
 }
 
 export const BEST_PRACTICES: BestPractice[] = [
@@ -59,5 +61,23 @@ export const BEST_PRACTICES: BestPractice[] = [
     right: `@Event() change: EventEmitter<Detail>;\n// ...\nthis.change.emit(detail);`,
     why: 'Stencil generates typed docs and consistent event metadata for @Event() emitters.',
     docsUrl: 'https://stenciljs.com/docs/events',
+  },
+  {
+    id: 'v5-boolean-attributes',
+    title: 'Stencil 5+: do not set boolean attributes to "false"',
+    wrong: `el.setAttribute('disabled', 'false'); // disabled is now true`,
+    right: `el.removeAttribute('disabled');\n// or\nel.disabled = false;`,
+    why: 'A boolean prop is true whenever its attribute is present, whatever the value.',
+    docsUrl: 'https://stenciljs.com/docs/properties',
+    since: '5.0.0',
+  },
+  {
+    id: 'v5-should-update-changes',
+    title: 'Stencil 5+: componentShouldUpdate takes a changes map',
+    wrong: `componentShouldUpdate(newVal, oldVal, propName) {\n  if (propName === 'value' && newVal === oldVal) return false;\n}`,
+    right: `componentShouldUpdate(changes: ComponentShouldUpdateChanges<this>) {\n  if (changes['value'] && changes['value'].newVal === changes['value'].oldVal) return false;\n}`,
+    why: 'It is called once per render cycle with every changed member, not once per member.',
+    docsUrl: 'https://stenciljs.com/docs/component-lifecycle',
+    since: '5.0.0',
   },
 ];
