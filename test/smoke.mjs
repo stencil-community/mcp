@@ -69,6 +69,44 @@ const autoPayload = JSON.parse(autoList.content[0].text);
 assert.equal(autoPayload.unavailable.length, 0, 'expected nothing filtered on 4.43.5');
 console.log('get_decorator_reference(projectRoot) -> detected', autoPayload.stencilVersion, 'nothing excluded');
 
+// A Stencil 5 project gets the Stencil 5 API.
+const v5Component = await client.callTool({
+  name: 'get_decorator_reference',
+  arguments: { name: 'Component', version: '5.0.0-rc.9' },
+});
+assert.match(v5Component.content[0].text, /encapsulation: \{ type: 'shadow' \}/);
+assert.doesNotMatch(v5Component.content[0].text, /shadow: true/);
+
+const v5Life = await client.callTool({ name: 'get_lifecycle_reference', arguments: { version: '5.0.0' } });
+assert.match(v5Life.content[0].text, /`changes` map/);
+
+const rules = async (version) =>
+  JSON.parse((await client.callTool({ name: 'get_best_practices', arguments: { version } })).content[0].text).map((r) => r.id);
+assert.ok((await rules('5.0.0')).includes('v5-boolean-attributes'));
+assert.ok(!(await rules('4.45.5')).includes('v5-boolean-attributes'), 'Stencil 5 rules must not reach a Stencil 4 project');
+
+// Looking a rule up by id follows the same versioning as the listing.
+const rule = async (args) =>
+  JSON.parse((await client.callTool({ name: 'get_best_practices', arguments: args })).content[0].text);
+assert.equal((await rule({ id: 'v5-boolean-attributes', version: '4.45.5' })).availableInVersion, false);
+assert.equal((await rule({ id: 'v5-boolean-attributes', projectRoot: targetProject })).availableInVersion, false);
+assert.match((await rule({ id: 'v5-boolean-attributes', version: '5.0.0' })).docsUrl, /\/docs\/v5\//);
+assert.equal((await rule({ id: 'async-method', version: '4.45.5' })).id, 'async-method');
+
+const guide = await client.callTool({ name: 'get_v5_migration_guide', arguments: { area: 'component' } });
+assert.ok(JSON.parse(guide.content[0].text).changes.every((c) => c.area === 'component'));
+const badArea = await client.callTool({ name: 'get_v5_migration_guide', arguments: { area: 'nope' } });
+assert.equal(badArea.isError, true);
+
+const check = await client.callTool({
+  name: 'check_v5_compatibility',
+  arguments: { code: "@Component({ tag: 'my-a', shadow: true })\nclass A {}" },
+});
+assert.equal(JSON.parse(check.content[0].text).findings[0].change.id, 'encapsulation');
+const noCode = await client.callTool({ name: 'check_v5_compatibility', arguments: {} });
+assert.equal(noCode.isError, true);
+console.log('Stencil 5 reference, migration guide and compatibility check OK');
+
 const bp = await client.callTool({ name: 'get_best_practices', arguments: {} });
 console.log('get_best_practices -> rules:', JSON.parse(bp.content[0].text).length);
 

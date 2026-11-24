@@ -3,9 +3,11 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 import { detectStencilVersion } from './detectVersion.js';
 import { DECORATORS, LIFECYCLE } from './data/decorators.js';
 import { BEST_PRACTICES } from './data/bestPractices.js';
-import { isAvailableIn, splitByVersion } from './versionFilter.js';
+import { BREAKING_CHANGES_URL, V5_CHANGES } from './data/v5Migration.js';
+import { findV4Usage } from './v5Migration.js';
+import { forVersion, isAvailableIn, splitByVersion } from './versionFilter.js';
 
-export const SERVER_NAME = '@stencil/mcp';
+export const SERVER_NAME = '@stencil-community/mcp';
 export const SERVER_VERSION = '0.1.0';
 
 /**
@@ -39,7 +41,7 @@ export function createStencilMcpServer(): Server {
       {
         name: 'get_decorator_reference',
         description:
-          'Get accurate reference for StencilJS decorators (@Component, @Prop, @State, @Watch, @Event, @Listen, @Method, @Element, @AttachInternals), including signatures, idiomatic examples, and anti-patterns to avoid. Pass a version (or projectRoot) to filter out decorators introduced after the Stencil the project actually runs.',
+          'Get accurate reference for StencilJS decorators (@Component, @Prop, @State, @Watch, @Event, @Listen, @Method, @Element, @AttachInternals, @PropSerialize, @AttrDeserialize), including signatures, idiomatic examples, and anti-patterns to avoid. Pass a version (or projectRoot) to get the API as it is in the Stencil the project actually runs; some decorators differ between Stencil 4 and 5.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -63,13 +65,25 @@ export function createStencilMcpServer(): Server {
       {
         name: 'get_lifecycle_reference',
         description:
-          'Get the StencilJS component lifecycle methods (componentWillLoad, componentDidLoad, render, etc.) with when each fires.',
-        inputSchema: { type: 'object', properties: {} },
+          'Get the StencilJS component lifecycle methods (componentWillLoad, componentDidLoad, render, etc.) with when each fires. Pass a version (or projectRoot) to get the behavior in that version.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            version: {
+              type: 'string',
+              description: 'Optional Stencil version (e.g. "5.0.0"). Takes precedence over projectRoot.',
+            },
+            projectRoot: {
+              type: 'string',
+              description: 'Optional absolute path to the project root, used to detect the version.',
+            },
+          },
+        },
       },
       {
         name: 'get_best_practices',
         description:
-          'Get idiomatic StencilJS best practices as concrete "wrong vs right" rules, so AI suggestions use built-in Stencil features instead of manual workarounds.',
+          'Get idiomatic StencilJS best practices as concrete "wrong vs right" rules, so AI suggestions use built-in Stencil features instead of manual workarounds. Pass a version (or projectRoot) to leave out rules that do not apply to it, or have one flagged when looked up by id.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -77,7 +91,42 @@ export function createStencilMcpServer(): Server {
               type: 'string',
               description: 'Optional best-practice id to fetch a single rule. Omit to get all.',
             },
+            version: {
+              type: 'string',
+              description: 'Optional Stencil version (e.g. "5.0.0"). Takes precedence over projectRoot.',
+            },
+            projectRoot: {
+              type: 'string',
+              description: 'Optional absolute path to the project root, used to detect the version.',
+            },
           },
+        },
+      },
+      {
+        name: 'get_v5_migration_guide',
+        description:
+          'List what changed between Stencil 4 and 5, what to use instead, and whether `stencil migrate` rewrites it.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            area: {
+              type: 'string',
+              enum: ['component', 'config', 'testing', 'tooling'],
+              description: 'Optional area to limit the list to.',
+            },
+          },
+        },
+      },
+      {
+        name: 'check_v5_compatibility',
+        description:
+          'Check code (a component, stencil.config.ts or package.json) for Stencil 4 APIs that changed in Stencil 5. Use it on code for a Stencil 5 project before suggesting it. Text-based: an empty result does not prove the code is compatible.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            code: { type: 'string', description: 'The source code to check.' },
+          },
+          required: ['code'],
         },
       },
     ],
@@ -131,7 +180,7 @@ export function createStencilMcpServer(): Server {
               ),
             );
           }
-          return textResult(JSON.stringify(doc, null, 2));
+          return textResult(JSON.stringify(forVersion(doc, version), null, 2));
         }
 
         if (!version) {
@@ -139,22 +188,95 @@ export function createStencilMcpServer(): Server {
         }
         const { available, unavailable } = splitByVersion(DECORATORS, version);
         return textResult(
-          JSON.stringify({ stencilVersion: version, decorators: available, unavailable }, null, 2),
+          JSON.stringify(
+            {
+              stencilVersion: version,
+              decorators: available.map((d) => forVersion(d, version)),
+              unavailable,
+            },
+            null,
+            2,
+          ),
         );
       }
 
-      case 'get_lifecycle_reference':
-        return textResult(JSON.stringify(LIFECYCLE, null, 2));
+      case 'get_lifecycle_reference': {
+        const version = await resolveVersion(
+          args.version as string | undefined,
+          args.projectRoot as string | undefined,
+        );
+        return textResult(
+          JSON.stringify(LIFECYCLE.map((l) => forVersion(l, version)), null, 2),
+        );
+      }
 
       case 'get_best_practices': {
         const id = args.id as string | undefined;
+        const version = await resolveVersion(
+          args.version as string | undefined,
+          args.projectRoot as string | undefined,
+        );
         if (id) {
           const bp = BEST_PRACTICES.find((b) => b.id === id);
-          return textResult(
-            bp ? JSON.stringify(bp, null, 2) : `Unknown best-practice id "${id}".`,
-          );
+          if (!bp) return textResult(`Unknown best-practice id "${id}".`);
+          if (!isAvailableIn(version, bp.since)) {
+            return textResult(
+              JSON.stringify(
+                {
+                  bestPractice: bp,
+                  availableInVersion: false,
+                  note: `This rule applies from Stencil ${bp.since} but this project runs ${version}. Do not apply it here.`,
+                },
+                null,
+                2,
+              ),
+            );
+          }
+          return textResult(JSON.stringify(forVersion(bp, version), null, 2));
         }
-        return textResult(JSON.stringify(BEST_PRACTICES, null, 2));
+        const rules = BEST_PRACTICES.filter((b) => isAvailableIn(version, b.since));
+        return textResult(
+          JSON.stringify(rules.map((b) => forVersion(b, version)), null, 2),
+        );
+      }
+
+      case 'get_v5_migration_guide': {
+        const area = args.area as string | undefined;
+        const changes = area ? V5_CHANGES.filter((c) => c.area === area) : V5_CHANGES;
+        if (changes.length === 0) {
+          return {
+            isError: true,
+            content: [{ type: 'text', text: `Unknown area "${area}".` }],
+          };
+        }
+        return textResult(
+          JSON.stringify(
+            { preview: 'stencil migrate --dry-run (requires Stencil 5)', changes, fullList: BREAKING_CHANGES_URL },
+            null,
+            2,
+          ),
+        );
+      }
+
+      case 'check_v5_compatibility': {
+        if (typeof args.code !== 'string') {
+          return {
+            isError: true,
+            content: [{ type: 'text', text: 'check_v5_compatibility requires a "code" string.' }],
+          };
+        }
+        const findings = findV4Usage(args.code);
+        return textResult(
+          JSON.stringify(
+            {
+              findings,
+              note: 'Text-based check of this code only. Run `stencil migrate --dry-run` (requires Stencil 5) to check the project.',
+              fullList: BREAKING_CHANGES_URL,
+            },
+            null,
+            2,
+          ),
+        );
       }
 
       default:
