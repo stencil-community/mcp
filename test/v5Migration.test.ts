@@ -24,6 +24,13 @@ test('finds replaced @Component options with their line', () => {
   assert.deepEqual(ids(`@Component({ tag: 'my-a', scoped: true }) class A {}`), ['encapsulation']);
 });
 
+test('follows a renamed Component import', () => {
+  const code = `import { Component as Cmp, h } from '@stencil/core';\n@Cmp({ tag: 'my-a', scoped: true })\nclass A {}`;
+  assert.deepEqual(ids(code), ['encapsulation']);
+  assert.deepEqual(ids(`@Cmp({ tag: 'my-a', scoped: true })\nclass A {}`), []);
+  assert.deepEqual(ids(`import { Component as Cmp } from 'other';\n@Cmp({ scoped: true })\nclass A {}`), []);
+});
+
 test('accepts a Stencil 5 component', () => {
   const code = `
     import { Component, h, Prop } from '@stencil/core';
@@ -84,9 +91,16 @@ test('finds changed config options', () => {
       buildEs5: true,
       extras: { experimentalSlotFixes: true },
       rollupPlugins: {},
-      outputTargets: [{ type: 'dist' }, { type: 'dist-custom-elements' }, { type: 'www' }],
+      outputTargets: [{ type: 'dist', esmLoaderPath: '../loader' }, { type: 'dist-custom-elements' }, { type: 'www' }],
     };`;
-  assert.deepEqual(ids(code), ['es5', 'extras', 'rollup', 'output-targets', 'output-targets']);
+  assert.deepEqual(ids(code), [
+    'es5',
+    'extras',
+    'rollup',
+    'output-targets',
+    'output-targets',
+    'output-target-options',
+  ]);
 });
 
 test('only reads short option names inside a Stencil config', () => {

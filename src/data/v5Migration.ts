@@ -90,6 +90,15 @@ export const V5_CHANGES: MigrationChange[] = [
     automatic: true,
   },
   {
+    id: 'output-target-options',
+    area: 'config',
+    before:
+      '`esmLoaderPath`, `collectionDir`, `typesDir`, `isPrimaryPackageOutputTarget` and `generateTypeDeclarations` on output targets',
+    after:
+      'Use `loaderPath`, and `collection` and `types` output targets with a `dir`. Remove the last two.',
+    automatic: true,
+  },
+  {
     id: 'extras',
     area: 'config',
     before: '`extras` in stencil.config.ts',

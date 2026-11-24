@@ -55,6 +55,10 @@ export function findV4Usage(code: string): MigrationFinding[] {
       'output-targets',
       /\btype\s*:\s*['"](dist(?:-custom-elements|-hydrate-script|-collection|-types)?)['"]/g,
     );
+    addMatches(
+      'output-target-options',
+      /\b(esmLoaderPath|collectionDir|typesDir|isPrimaryPackageOutputTarget|generateTypeDeclarations)\s*:/g,
+    );
     addMatches('extras', /\b(extras)\s*:/g);
     addMatches('build-flags', /\b(buildDist|buildDocs|devMode)\s*:/g);
     addMatches('rollup', /\b(rollupPlugins|rollupConfig)\s*:/g);
@@ -105,9 +109,21 @@ function skipString(code: string, i: number): number {
   return i;
 }
 
+/** The local names `Component` is imported under, e.g. `Cmp` for `Component as Cmp`. */
+function componentNames(source: string): Set<string> {
+  const names = new Set(['Component']);
+  for (const [, specifiers] of source.matchAll(/import\s*\{([^}]*)\}\s*from\s*['"]@stencil\/core['"]/g)) {
+    const alias = /\bComponent\s+as\s+([\w$]+)/.exec(specifiers)?.[1];
+    if (alias) names.add(alias);
+  }
+  return names;
+}
+
 /** Yields the top-level keys of every `@Component({ ... })` options object. */
 function* componentOptionKeys(source: string): Generator<{ key: string; index: number }> {
-  for (const match of source.matchAll(/@Component\s*\(\s*\{/g)) {
+  const names = componentNames(source);
+  for (const match of source.matchAll(/@([\w$]+)\s*\(\s*\{/g)) {
+    if (!names.has(match[1])) continue;
     let depth = 1;
     let i = match.index + match[0].length;
     let expectKey = true;
