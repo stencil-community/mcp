@@ -1,0 +1,184 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: 'Release type'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - dev
+      version_bump:
+        description: 'Version bump (production releases only). auto = derive from conventional commits'
+        required: true
+        default: 'auto'
+        type: choice
+        options:
+          - auto
+          - patch
+          - minor
+          - major
+      dry_run:
+        description: 'Dry run (production releases only)'
+        required: false
+        default: false
+        type: boolean
+      npm_tag:
+        description: 'NPM dist tag (dev releases only, also used as version suffix)'
+        required: false
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - next
+          - alpha
+          - beta
+          - canary
+          - nightly
+      custom_npm_tag:
+        description: 'Custom NPM tag (dev releases only, overrides selection above, e.g., v0.1.x)'
+        required: false
+        type: string
+
+# Remove default permissions of GITHUB_TOKEN for security
+# https://docs.github.com/en/actions/using-jobs/assigning-permissions-to-jobs
+permissions: {}
+
+jobs:
+  # Production release - semantic-release derives the version from conventional commits
+  production-release:
+    if: inputs.release_type == 'production'
+    name: Production Release
+    concurrency:
+      group: release-production
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 🔍 Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.10.0
+          registry-url: 'https://registry.npmjs.org/'
+          cache: 'npm'
+
+      - name: 🔄 Update npm for trusted publishing
+        run: npm install -g npm@11.6.0
+
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      - name: 🛠 Build package
+        run: npm run build
+
+      - name: 🧪 Test
+        run: npm test && npm run test:smoke
+
+      - name: 🚀 Run semantic-release
+        if: ${{ !inputs.dry_run }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TYPE: ${{ inputs.version_bump }}
+        run: npm run release
+
+      - name: Dry run semantic-release
+        if: ${{ inputs.dry_run }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TYPE: ${{ inputs.version_bump }}
+        run: npm run release -- --dry-run
+
+  # Dev/Nightly release - prerelease version published under a custom npm dist tag
+  dev-release:
+    if: inputs.release_type == 'dev'
+    name: Dev Release
+    concurrency:
+      group: release-dev-${{ inputs.custom_npm_tag || inputs.npm_tag }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      id-token: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 🔍 Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.10.0
+          registry-url: 'https://registry.npmjs.org/'
+          cache: 'npm'
+
+      - name: 🔄 Update npm for trusted publishing
+        run: npm install -g npm@11.6.0
+
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      - name: 🛠 Build package
+        run: npm run build
+
+      - name: 🧪 Test
+        run: npm test && npm run test:smoke
+
+      - name: 🏷️ Generate dev version
+        id: version
+        env:
+          NPM_TAG: ${{ inputs.custom_npm_tag || inputs.npm_tag }}
+        run: |
+          COMMIT_SHA=$(git rev-parse --short HEAD)
+          TIMESTAMP=$(date +%Y%m%d%H%M%S)
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+
+          if [ "${NPM_TAG}" = "nightly" ]; then
+            DEV_VERSION="${CURRENT_VERSION}-nightly.${TIMESTAMP}"
+          else
+            DEV_VERSION="${CURRENT_VERSION}-${NPM_TAG}.${TIMESTAMP}.${COMMIT_SHA}"
+          fi
+
+          echo "version=${DEV_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "npm_tag=${NPM_TAG}" >> "$GITHUB_OUTPUT"
+          echo "📦 Publishing version: ${DEV_VERSION} with tag: ${NPM_TAG}"
+
+      - name: 📝 Update package.json version
+        run: npm version "${{ steps.version.outputs.version }}" --no-git-tag-version
+
+      - name: 🚀 Publish to npm
+        run: npm publish --tag "${{ steps.version.outputs.npm_tag }}" --access public --provenance
+
+      - name: 🏷️ Create git tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${{ steps.version.outputs.version }}" -m "Release v${{ steps.version.outputs.version }}"
+          git push origin "v${{ steps.version.outputs.version }}"
+
+      - name: ✅ Summary
+        run: |
+          echo "## 🎉 Dev Release Published" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** \`${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **NPM Tag:** \`${{ steps.version.outputs.npm_tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Install with:" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "npm install @stencil-community/mcp@${{ steps.version.outputs.npm_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
