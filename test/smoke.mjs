@@ -37,6 +37,38 @@ assert.match(versionText, /4\.43\.5/, 'expected the fixture version 4.43.5 to be
 const listen = await client.callTool({ name: 'get_decorator_reference', arguments: { name: 'Listen' } });
 console.log('\nget_decorator_reference(Listen) -> antiPattern present:', /antiPattern/.test(listen.content[0].text));
 
+// Version-aware filtering: @AttachInternals (since 4.5.0) must be excluded on an
+// older Stencil, and flagged as unavailable when looked up by name.
+const oldList = await client.callTool({
+  name: 'get_decorator_reference',
+  arguments: { version: '4.4.0' },
+});
+const oldPayload = JSON.parse(oldList.content[0].text);
+assert.ok(
+  !oldPayload.decorators.some((d) => d.name === 'AttachInternals'),
+  'expected @AttachInternals to be filtered out on Stencil 4.4.0',
+);
+assert.ok(
+  oldPayload.unavailable.some((u) => u.name === 'AttachInternals'),
+  'expected @AttachInternals to be reported as unavailable',
+);
+console.log('get_decorator_reference(version=4.4.0) -> excluded:', oldPayload.unavailable.map((u) => u.name).join(', '));
+
+const flagged = await client.callTool({
+  name: 'get_decorator_reference',
+  arguments: { name: 'AttachInternals', version: '4.4.0' },
+});
+assert.match(flagged.content[0].text, /"availableInVersion": false/, 'expected AttachInternals flagged unavailable');
+
+// projectRoot (4.43.5 fixture) auto-detects the version and keeps everything.
+const autoList = await client.callTool({
+  name: 'get_decorator_reference',
+  arguments: { projectRoot: targetProject },
+});
+const autoPayload = JSON.parse(autoList.content[0].text);
+assert.equal(autoPayload.unavailable.length, 0, 'expected nothing filtered on 4.43.5');
+console.log('get_decorator_reference(projectRoot) -> detected', autoPayload.stencilVersion, 'nothing excluded');
+
 const bp = await client.callTool({ name: 'get_best_practices', arguments: {} });
 console.log('get_best_practices -> rules:', JSON.parse(bp.content[0].text).length);
 
